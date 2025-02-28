@@ -1,0 +1,160 @@
+#!/usr/bin/env php
+<?php
+
+function get(string $url, string $token): array
+{
+    $ch = curl_init($url);
+
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 900);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 900);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Bearer ' . $token,
+        'Content-Type: application/json'
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    curl_close($ch);
+
+    return [
+        'status' => $httpCode,
+        'body' => json_decode($response, true)
+    ];
+}
+
+function post(string $url, array $payload, array $headers = []): array
+{
+    $ch = curl_init($url);
+    $jsonPayload = json_encode($payload);
+
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 900);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 900);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array_merge([
+        'Content-Type: application/json',
+        'Content-Length: ' . strlen($jsonPayload)
+    ], $headers));
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    curl_close($ch);
+
+    return [
+        'status' => $httpCode,
+        'body' => json_decode($response, true)
+    ];
+}
+
+function login(array $args): array
+{
+    echo date('H:i:s') . ' ▸ Đăng nhập tài khoản HSA...' . PHP_EOL;
+
+    return post('https://api.hsa.edu.vn/accounts/sign-in', [
+        'id' => $args['u'],
+        'password' => $args['p']
+    ])['body'];
+}
+
+
+function registerSlot(int $batchId, int $locationId, int $slotId, int $accountId, string $token): array
+{
+    echo date('H:i:s') . ' ▸ ...' . PHP_EOL;
+    echo date('H:i:s') . " ▸ Đăng ký ca thi {$slotId} ở địa điểm {$locationId} của đợt thi {$batchId}" . PHP_EOL;
+
+    return post('https://api.hsa.edu.vn/exam/register?accountId=' . $accountId, ['record' => [
+        'periodId' => '39',
+        'batchId' => $batchId,
+        'locationId' => $locationId,
+        'slotId' => $slotId
+    ]], [
+        'Authorization' => 'Bearer ' . $token
+    ]);
+}
+
+function getLocation(int $batchId, string $token): array
+{
+    $batchs = [
+        90 => '501',
+        80 => '502',
+        81 => '503',
+        82 => '504',
+        83 => '505',
+        84 => '506'
+    ];
+
+    echo date('H:i:s') . ' ▸ Lấy địa điểm của đợt thi ' . $batchs[$batchId] . PHP_EOL;
+
+    return get('https://api.hsa.edu.vn/exam/views/registration/available-location?batchId=' . $batchId, $token)['body'];
+}
+
+function getSlot(int $locationId, string $token): array
+{
+    echo date('H:i:s') . ' ▸ Lấy ca thi...' . PHP_EOL;
+
+    return get('https://api.hsa.edu.vn/exam/views/registration/available-slot?locationId=' . $locationId, $token)['body'];
+}
+
+echo '[DKHSA] v1.4.7 build 250223' . PHP_EOL;
+
+// -----
+date_default_timezone_set('Asia/Ho_Chi_Minh');
+$isLoggedIn = false;
+$loggedInAt = null;
+$user = [];
+$args = getopt('u:p:i:b:l:s:');
+// -----
+
+while (!$isLoggedIn) {
+    // -----
+    $user = login($args);
+    if (!isset($user['accountInfo'])) {
+        echo date('H:i:s') . ' ▸ Đăng nhập thất bại: ' . $user['message'] . PHP_EOL;
+        continue;
+    }
+
+    echo date('H:i:s') . ' ▸ Đăng nhập thành công' . PHP_EOL;
+    echo date('H:i:s') . ' ▸ ID tài khoản HSA: ' . $user['accountInfo']['id'] . PHP_EOL;
+    echo date('H:i:s') . ' ▸ Trạng thái: ' . implode(', ', $user['accountInfo']['status']) . PHP_EOL;
+    $isLoggedIn = true;
+    $loggedInAt = time();
+    // -----
+
+    // -----
+
+    // -----
+
+    echo PHP_EOL . date('H:i:s') . ' ▸ Bắt đầu đăng ký thi!' . PHP_EOL;
+    while (true) {
+        if ((time() - $loggedInAt) >= 1798) {
+            echo date('H:i:s') . ' ▸ Hết phiên đăng nhập' . PHP_EOL;
+            $isLoggedIn = false;
+            break;
+        }
+
+        try {
+            $registerSlotResult = registerSlot($args['b'], $args['l'], $args['s'], $user['accountInfo']['id'], $user['token']);
+
+            if (
+                isset($registerSlotResult['body']['status'])
+                && $registerSlotResult['body']['status'] == 'WAIT_FOR_PAYMENT'
+            ) {
+                echo date('H:i:s') . ' ▸ Tuyệt vời. Đăng ký ca thi thành công!' . PHP_EOL;
+                exit;
+            } else {
+                echo date('H:i:s') . ' ▸ Đăng ký thất bại: ' . $registerSlotResult['body']['message'] . PHP_EOL;
+                exit;
+            }
+        } catch (Throwable $th) {
+            if ((time() - $loggedInAt) >= 1798) {
+                echo date('H:i:s') . ' ▸ Hết phiên đăng nhập' . PHP_EOL;
+                $isLoggedIn = false;
+                break;
+            }
+        }
+    }
+}

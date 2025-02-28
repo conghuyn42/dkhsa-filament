@@ -1,0 +1,90 @@
+#!/usr/bin/env php
+<?php
+
+use GuzzleHttp\Exception\ClientException;
+
+require __DIR__ . '/vendor/autoload.php';
+
+$cli = new League\CLImate\CLImate;
+date_default_timezone_set('Asia/Ho_Chi_Minh');
+
+$cli->bold()->lightBlue()->out('[DKHSA] v1.4.3 build 250220');
+$cli->whisper(date('H:i:s') . ' ▸ Khởi động...');
+
+$isSignedIn = false;
+$signedInTime = null;
+$args = getopt('u:p:i:', ['username:', 'password:', 'immediately:']);
+$http = new GuzzleHttp\Client([
+    'base_uri' => 'https://api.hsa.edu.vn',
+    'timeout'  => 900
+]);
+
+dd($http->get('/exam/views/registration/available-location?batchId=80', [
+    'headers' => [
+        'Authorization' => 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiI0MTI3YTk2YS1mNTFmLTQ5YjAtOTUzMi1kNjk5ZjZhYWMwMTEiLCJpYXQiOjE3NDAyNDEyOTAsImlzcyI6ImFjY291bnQtbWFuYWdlciIsImF1ZCI6IjM5MzA3MCIsImV4cCI6MTc0MDI0MzA5MCwibmJmIjoxNzQwMjQxMjkwLCJpZCI6IjM5MzA3MCIsInJvbGVJZCI6InVzZXIiLCJzdGF0dXMiOlsiQUNUSVZFIiwiSU5GT19VUERBVEVEIiwiRU1BSUxfQ09ORklSTUVEIiwiUEhPTkVfTlVNQkVSX0NPTkZJUk1FRCJdLCJhZG1pbkFjY291bnQiOmZhbHNlLCJ1c2VySWQiOiIzOTE2MDciLCJhY2NvdW50SW5mbyI6eyJpZCI6IjM5MzA3MCIsImFkbWluIjpmYWxzZSwidXNlcklkIjoiMzkxNjA3IiwiZW1haWwiOiJjb25naHV5bjQyQGdtYWlsLmNvbSJ9fQ.HB85Z7XAAL5Ulh4Yt-5HXllu3HBDaWZPNcAAwcyxa9U'
+    ]
+])->getBody()->getContents());
+
+dd('done');
+
+function signIn(): object
+{
+    global $cli, $http, $args;
+    $cli->whisper(date('H:i:s') . ' ▸ Đăng nhập tài khoản HSA (' . $args['u'] . ')...');
+
+    try {
+        $response = json_decode($http->post('/accounts/sign-in', [
+            'json' => [
+                'id' => $args['u'],
+                'password' => $args['p']
+            ]
+        ])->getBody());
+
+        if (isset($response->message)) {
+            $cli->error(date('H:i:s') . ' ✕ Đăng nhập thất bại: ' . $response->message);
+            exit;
+        }
+
+        $cli->info(date('H:i:s') . ' ▸ Đăng nhập thành công. ID tài khoản: ' . $response->accountInfo->id);
+        return $response;
+    } catch (ClientException $e) {
+        $response = json_decode($e->getResponse()->getBody());
+        $cli->error(date('H:i:s') . ' ✕ Đăng nhập thất bại: ' . $response->message);
+        exit;
+    }
+}
+
+$cli->green(date('H:i:s') . ' ▸ Khởi động hoàn tất.');
+
+while (!$isSignedIn) {
+    $user = signIn();
+    $isSignedIn = true;
+    $signedInTime = time();
+
+    $cli->whisper(date('H:i:s') . ' ▸ Kiểm tra thông tin tài khoản...');
+    $cli->padding(20)->label('• Hồ sơ dự thi đã đầy đủ?')
+        ->result(in_array('INFO_UPDATED', $user->accountInfo->status) ? 'Rồi' : 'Chưa');
+    $cli->padding(20)->label('• Xác minh email?........')
+        ->result(in_array('EMAIL_CONFIRMED', $user->accountInfo->status) ? 'Rồi' : 'Chưa');
+    $cli->padding(20)->label('• Xác minh số điện thoại?')
+        ->result(in_array('PHONE_NUMBER_CONFIRMED', $user->accountInfo->status) ? 'Rồi' : 'Chưa');
+
+    if ($args['i'] == "false") {
+        $cli->yellow(date('H:i:s') . ' ▸ Mọi thứ đã sẵn sàng để đăng ký ca thi. Nhấn ENTER để bắt đầu');
+        fgets(STDIN);
+    }
+
+    //
+    while (time() < 1740275999) {
+        $remainingTime = 1740275999 - time();
+        $hours = floor($remainingTime / 3600);
+        $minutes = floor(($remainingTime % 3600) / 60);
+        $seconds = $remainingTime % 60;
+
+        $cli->lightYellow()->inline(date('H:i:s') . " ▸ Chưa mở đăng ký. Tự động đăng ký sau {$hours} giờ {$minutes} phút {$seconds} giây\r");
+        usleep(100);
+    }
+    //
+
+    $cli->yellow(date('H:i:s') . ' ▸ Bắt đầu đăng ký ca thi...');
+}
